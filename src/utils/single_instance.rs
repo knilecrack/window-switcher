@@ -14,7 +14,11 @@ pub struct SingleInstance {
     handle: Option<HANDLE>,
 }
 
+// SAFETY: SingleInstance only holds a Windows HANDLE which can be safely sent between threads.
+// The HANDLE is only accessed from the main thread where the instance is created and dropped.
 unsafe impl Send for SingleInstance {}
+// SAFETY: SingleInstance's handle is never mutated after creation, only read during drop.
+// All operations on the handle are atomic from Windows' perspective.
 unsafe impl Sync for SingleInstance {}
 
 impl SingleInstance {

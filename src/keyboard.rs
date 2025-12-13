@@ -9,6 +9,7 @@ use crate::{
 
 use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::LazyLock;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
@@ -23,9 +24,12 @@ use windows::Win32::{
 };
 
 static KEYBOARD_STATE: LazyLock<Mutex<Vec<HotKeyState>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-static mut WINDOW: HWND = HWND(0 as _);
-static mut IS_SHIFT_PRESSED: bool = false;
-static mut PREVIOUS_KEYCODE: u32 = 0;
+/// Window handle for keyboard hook callbacks. Set once during initialization and never changed.
+static WINDOW: AtomicIsize = AtomicIsize::new(0);
+/// Tracks whether shift key is currently pressed for reverse switching.
+static IS_SHIFT_PRESSED: AtomicBool = AtomicBool::new(false);
+/// Tracks the previous keycode to handle modifier release events.
+static PREVIOUS_KEYCODE: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug)]
 pub struct KeyboardListener {
@@ -34,7 +38,7 @@ pub struct KeyboardListener {
 
 impl KeyboardListener {
     pub fn init(hwnd: HWND, hotkeys: &[&Hotkey]) -> Result<Self> {
-        unsafe { WINDOW = hwnd }
+        WINDOW.store(hwnd.0 as isize, Ordering::SeqCst);
 
         let keyboard_state = hotkeys
             .iter()
@@ -77,15 +81,22 @@ struct HotKeyState {
     is_modifier_pressed: bool,
 }
 
+/// Helper to get the window handle safely from atomic storage.
+fn get_window() -> HWND {
+    HWND(WINDOW.load(Ordering::SeqCst) as _)
+}
+
 unsafe extern "system" fn keyboard_proc(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+    // SAFETY: l_param points to a valid KBDLLHOOKSTRUCT provided by Windows
     let kbd_data: &KBDLLHOOKSTRUCT = unsafe { &*(l_param.0 as *const _) };
     debug!("keyboard {kbd_data:?}");
     let mut is_modifier = false;
     let scan_code = kbd_data.scanCode;
     let is_key_pressed = || kbd_data.flags.0 & LLKHF_UP.0 == 0;
     if [SCANCODE_LSHIFT, SCANCODE_RSHIFT].contains(&scan_code) {
-        unsafe { IS_SHIFT_PRESSED = is_key_pressed(); }
+        IS_SHIFT_PRESSED.store(is_key_pressed(), Ordering::SeqCst);
     }
+    let window = get_window();
     for state in KEYBOARD_STATE.lock().iter_mut() {
         if state.hotkey.modifier.contains(&scan_code) {
             is_modifier = true;
@@ -93,12 +104,14 @@ unsafe extern "system" fn keyboard_proc(code: i32, w_param: WPARAM, l_param: LPA
                 state.is_modifier_pressed = true;
             } else {
                 state.is_modifier_pressed = false;
-                if unsafe { PREVIOUS_KEYCODE } == state.hotkey.code {
+                if PREVIOUS_KEYCODE.load(Ordering::SeqCst) == state.hotkey.code {
                     let id = state.hotkey.id;
                     if id == SWITCH_APPS_HOTKEY_ID {
-                        unsafe { SendMessageW(WINDOW, WM_USER_SWITCH_APPS_DONE, None, None) };
+                        // SAFETY: window is a valid HWND set during init
+                        unsafe { SendMessageW(window, WM_USER_SWITCH_APPS_DONE, None, None) };
                     } else if id == SWITCH_WINDOWS_HOTKEY_ID {
-                        unsafe { SendMessageW(WINDOW, WM_USER_SWITCH_WINDOWS_DONE, None, None) };
+                        // SAFETY: window is a valid HWND set during init
+                        unsafe { SendMessageW(window, WM_USER_SWITCH_WINDOWS_DONE, None, None) };
                     }
                 }
             }
@@ -109,32 +122,36 @@ unsafe extern "system" fn keyboard_proc(code: i32, w_param: WPARAM, l_param: LPA
             if is_key_pressed() && state.is_modifier_pressed {
                 let id = state.hotkey.id;
                 if scan_code == state.hotkey.code {
-                    let reverse = if unsafe { IS_SHIFT_PRESSED } { 1 } else { 0 };
+                    let reverse = if IS_SHIFT_PRESSED.load(Ordering::SeqCst) { 1 } else { 0 };
                     if id == SWITCH_APPS_HOTKEY_ID {
+                        // SAFETY: window is a valid HWND set during init
                         unsafe {
-                            SendMessageW(WINDOW, WM_USER_SWITCH_APPS, None, Some(LPARAM(reverse)))
+                            SendMessageW(window, WM_USER_SWITCH_APPS, None, Some(LPARAM(reverse)))
                         };
-                        unsafe { PREVIOUS_KEYCODE = scan_code; }
+                        PREVIOUS_KEYCODE.store(scan_code, Ordering::SeqCst);
                         return LRESULT(1);
-                    } else if id == SWITCH_WINDOWS_HOTKEY_ID && unsafe { !IS_FOREGROUND_IN_BLACKLIST } {
+                    } else if id == SWITCH_WINDOWS_HOTKEY_ID && !IS_FOREGROUND_IN_BLACKLIST.load(Ordering::SeqCst) {
+                        // SAFETY: window is a valid HWND set during init
                         unsafe {
                             SendMessageW(
-                                WINDOW,
+                                window,
                                 WM_USER_SWITCH_WINDOWS,
                                 None,
                                 Some(LPARAM(reverse)),
                             )
                         };
-                        unsafe { PREVIOUS_KEYCODE = scan_code; }
+                        PREVIOUS_KEYCODE.store(scan_code, Ordering::SeqCst);
                         return LRESULT(1);
                     }
                 } else if scan_code == 0x01 && id == SWITCH_APPS_HOTKEY_ID {
-                    unsafe { SendMessageW(WINDOW, WM_USER_SWITCH_APPS_CANCEL, None, None) };
-                    unsafe { PREVIOUS_KEYCODE = scan_code; }
+                    // SAFETY: window is a valid HWND set during init
+                    unsafe { SendMessageW(window, WM_USER_SWITCH_APPS_CANCEL, None, None) };
+                    PREVIOUS_KEYCODE.store(scan_code, Ordering::SeqCst);
                     return LRESULT(1);
                 }
             }
         }
     }
+    // SAFETY: CallNextHookEx is called with valid parameters from the hook chain
     unsafe { CallNextHookEx(None, code, w_param, l_param) }
 }

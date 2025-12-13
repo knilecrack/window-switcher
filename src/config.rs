@@ -35,18 +35,20 @@ impl Default for Config {
             trayicon: true,
             log_level: LevelFilter::Info,
             log_file: None,
+            // These unwraps are safe because the hotkey strings are compile-time constants
+            // that are guaranteed to be valid hotkey definitions
             switch_windows_hotkey: Hotkey::create(
                 SWITCH_WINDOWS_HOTKEY_ID,
                 "switch windows",
                 "alt + `",
             )
-            .unwrap(),
+            .expect("default switch_windows_hotkey should be valid"),
             switch_windows_blacklist: Default::default(),
             switch_windows_ignore_minimal: false,
             switch_windows_only_current_desktop: None,
             switch_apps_enable: false,
             switch_apps_hotkey: Hotkey::create(SWITCH_APPS_HOTKEY_ID, "switch apps", "alt + tab")
-                .unwrap(),
+                .expect("default switch_apps_hotkey should be valid"),
             switch_apps_ignore_minimal: false,
             switch_apps_override_icons: Default::default(),
             switch_apps_only_current_desktop: None,

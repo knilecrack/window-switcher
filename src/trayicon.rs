@@ -70,18 +70,22 @@ impl TrayIcon {
     }
 
     fn create_nid() -> NOTIFYICONDATAW {
+        // SAFETY: ICON_BYTES is a valid embedded .ico file
         let offset = unsafe {
             LookupIconIdFromDirectoryEx(ICON_BYTES.as_ptr(), true, 0, 0, LR_DEFAULTCOLOR)
         };
         let icon_data = &ICON_BYTES[offset as usize..];
+        // SAFETY: icon_data points to valid icon resource data
         let hicon =
             unsafe { CreateIconFromResourceEx(icon_data, true, 0x30000, 0, 0, LR_DEFAULTCOLOR) }
-                .expect("Failed to load icon resource");
+                .expect("Failed to load embedded icon resource - this is a compile-time asset");
+        // SAFETY: NAME is a valid wide string constant
         let mut tooltip: Vec<u16> = unsafe { NAME.as_wide() }.to_vec();
         tooltip.resize(128, 0);
         tooltip.pop();
         tooltip.push(0);
-        let tooltip: [u16; 128] = tooltip.try_into().unwrap();
+        // This conversion is infallible because we've resized to exactly 128 elements
+        let tooltip: [u16; 128] = tooltip.try_into().expect("tooltip buffer size mismatch");
         NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             uID: WM_USER_TRAYICON,
@@ -108,18 +112,21 @@ impl TrayIcon {
         let mut info_title: Vec<u16> = title.encode_utf16().collect();
         info_title.resize(63, 0);
         info_title.push(0);
-        let info_title: [u16; 64] = info_title.try_into().unwrap();
+        // This conversion is infallible because we've resized to exactly 64 elements
+        let info_title: [u16; 64] = info_title.try_into().expect("info_title buffer size mismatch");
 
         let mut info: Vec<u16> = message.encode_utf16().collect();
         info.resize(255, 0);
         info.push(0);
-        let info: [u16; 256] = info.try_into().unwrap();
+        // This conversion is infallible because we've resized to exactly 256 elements
+        let info: [u16; 256] = info.try_into().expect("info buffer size mismatch");
 
         self.data.uFlags = NIF_INFO;
         self.data.szInfoTitle = info_title;
         self.data.szInfo = info;
         self.data.dwInfoFlags = NIIF_INFO;
 
+        // SAFETY: self.data contains valid NOTIFYICONDATAW structure
         unsafe { Shell_NotifyIconW(NIM_MODIFY, &self.data) }
             .ok()
             .map_err(|e| anyhow!("Failed to show balloon notification, {}", e))?;

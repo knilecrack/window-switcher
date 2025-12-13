@@ -46,7 +46,8 @@ pub fn start(config: &Config) -> Result<()> {
 }
 
 /// Listen to this message to recreate the tray icon since the taskbar has been recreated.
-static mut WM_TASKBARCREATED: u32 = 0;
+/// Uses AtomicU32 for thread-safe access to the dynamically registered message ID.
+static WM_TASKBARCREATED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub struct App {
     hwnd: HWND,
@@ -95,6 +96,9 @@ impl App {
 
         app.set_trayicon();
 
+        // SAFETY: We store the App in user data to be retrieved by window_proc callbacks.
+        // The pointer remains valid for the lifetime of the window and is properly
+        // deallocated when IDM_EXIT is triggered via Box::from_raw.
         let app_ptr = Box::into_raw(Box::new(app)) as _;
 
         check_error(|| set_window_user_data(hwnd, app_ptr))
@@ -157,7 +161,9 @@ impl App {
     }
 
     fn create_window() -> Result<HWND> {
-        unsafe { WM_TASKBARCREATED = RegisterWindowMessageW(w!("TaskbarCreated")) };
+        // Register taskbar created message for tray icon recreation
+        let taskbar_created_msg = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
+        WM_TASKBARCREATED.store(taskbar_created_msg, std::sync::atomic::Ordering::SeqCst);
 
         let hinstance = unsafe { GetModuleHandleW(None) }
             .map_err(|err| anyhow!("Failed to get current module handle, {err}"))?;
@@ -234,6 +240,11 @@ impl App {
         }
     }
 
+    /// Window procedure callback for handling Windows messages.
+    /// 
+    /// # Safety
+    /// This function is marked unsafe extern "system" because it's called by Windows
+    /// as a callback. Windows guarantees valid parameters when calling this function.
     unsafe extern "system" fn window_proc(
         hwnd: HWND,
         msg: u32,
@@ -316,8 +327,12 @@ impl App {
                     match id {
                         IDM_EXIT => {
                             if let Ok(app) = get_app(hwnd) {
+                                // SAFETY: app was created via Box::into_raw in start(), and this
+                                // is the only place where Box::from_raw is called to reclaim ownership.
+                                // After this drop, the window is destroyed via PostQuitMessage.
                                 unsafe { drop(Box::from_raw(app)) }
                             }
+                            // SAFETY: PostQuitMessage terminates the message loop cleanly
                             unsafe { PostQuitMessage(0) }
                         }
                         IDM_STARTUP => {
@@ -336,12 +351,13 @@ impl App {
             WM_ERASEBKGND => {
                 return Ok(LRESULT(0));
             }
-            _ if msg == WM_USER_REGISTER_TRAYICON || unsafe { msg == WM_TASKBARCREATED } => {
+            _ if msg == WM_USER_REGISTER_TRAYICON || msg == WM_TASKBARCREATED.load(std::sync::atomic::Ordering::SeqCst) => {
                 let app = get_app(hwnd)?;
                 app.set_trayicon();
             }
             _ => {}
         }
+        // SAFETY: DefWindowProcW is called with valid window parameters
         Ok(unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) })
     }
 
@@ -416,7 +432,11 @@ impl App {
                 if state_windows.is_empty() {
                     state_windows = windows.iter().map(|(v, _)| v.0 as _).collect();
                 }
-                let hwnd = HWND(state_windows[index] as _);
+                // Use get() for bounds-safe access to prevent potential panic
+                let hwnd = state_windows
+                    .get(index)
+                    .map(|v| HWND(*v as _))
+                    .unwrap_or_else(|| HWND(state_windows[0] as _));
                 self.switch_windows_state = SwitchWindowsState {
                     cache: Some((module_path.clone(), state_id, index, state_windows)),
                     modifier_released: false,
@@ -455,8 +475,11 @@ impl App {
         )?;
         let mut apps = vec![];
         for (module_path, hwnds) in windows.iter() {
-            let module_hwnd = if is_iconic_window(hwnds[0].0) {
-                hwnds[hwnds.len() - 1].0
+            // hwnds is guaranteed to be non-empty by list_windows implementation
+            let module_hwnd = if hwnds.is_empty() {
+                continue;
+            } else if is_iconic_window(hwnds[0].0) {
+                hwnds.last().map(|(hwnd, _)| *hwnd).unwrap_or(hwnds[0].0)
             } else {
                 hwnds[0].0
             };
@@ -539,13 +562,24 @@ impl App {
     }
 }
 
+/// Retrieves the App instance stored in window user data.
+/// 
+/// # Safety
+/// This function is safe to call as long as:
+/// - The hwnd is the window created by App::create_window()
+/// - The App pointer was stored via set_window_user_data() in start()
+/// - The App has not been deallocated (only happens on IDM_EXIT)
 fn get_app(hwnd: HWND) -> Result<&'static mut App> {
-    unsafe {
-        let ptr = check_error(|| get_window_user_data(hwnd))
-            .map_err(|err| anyhow!("Failed to get window ptr, {err}"))?;
-        let tx: &mut App = &mut *(ptr as *mut App);
-        Ok(tx)
+    let ptr = check_error(|| get_window_user_data(hwnd))
+        .map_err(|err| anyhow!("Failed to get window ptr, {err}"))?;
+    if ptr == 0 {
+        return Err(anyhow!("Window user data is null"));
     }
+    // SAFETY: ptr was set via Box::into_raw in start() and points to valid App memory
+    // until IDM_EXIT triggers deallocation. The 'static lifetime is valid because
+    // the App lives for the duration of the program.
+    let app: &'static mut App = unsafe { &mut *(ptr as *mut App) };
+    Ok(app)
 }
 
 #[derive(Debug)]

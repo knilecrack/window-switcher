@@ -151,6 +151,8 @@ pub fn get_window_exe(hwnd: HWND) -> Option<String> {
 
 pub fn set_foreground_window(hwnd: HWND) {
     // ref https://github.com/microsoft/PowerToys/blob/4cb72ee126caf1f720c507f6a1dbe658cd515366/src/modules/fancyzones/FancyZonesLib/WindowUtils.cpp#L191
+    // SAFETY: All Windows API calls here are safe when hwnd is a valid window handle.
+    // The SendInput trick is used to work around Windows' focus stealing prevention.
     unsafe {
         if is_iconic_window(hwnd) {
             let _ = ShowWindow(hwnd, SW_RESTORE);
