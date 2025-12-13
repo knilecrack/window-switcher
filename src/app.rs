@@ -7,6 +7,7 @@ use crate::trayicon::TrayIcon;
 use crate::utils::{
     check_error, get_app_icon, get_foreground_window, get_window_user_data, is_iconic_window,
     is_running_as_admin, list_windows, set_foreground_window, set_window_user_data,
+    RELOAD_CONFIG_EVENT_NAME,
 };
 
 use anyhow::{anyhow, Result};
@@ -34,6 +35,7 @@ pub const WM_USER_SWITCH_APPS_DONE: u32 = 6011;
 pub const WM_USER_SWITCH_APPS_CANCEL: u32 = 6012;
 pub const WM_USER_SWITCH_WINDOWS: u32 = 6020;
 pub const WM_USER_SWITCH_WINDOWS_DONE: u32 = 6021;
+pub const WM_USER_RELOAD_CONFIG: u32 = 6030;
 pub const IDM_EXIT: u32 = 1;
 pub const IDM_STARTUP: u32 = 2;
 pub const IDM_CONFIGURE: u32 = 3;
@@ -97,7 +99,41 @@ impl App {
         check_error(|| set_window_user_data(hwnd, app_ptr))
             .map_err(|err| anyhow!("Failed to set window ptr, {err}"))?;
 
+        // Start the reload config event listener
+        Self::start_reload_config_listener(hwnd)?;
+
         Self::eventloop()
+    }
+
+    fn start_reload_config_listener(hwnd: HWND) -> Result<()> {
+        use crate::utils::to_wstring;
+        use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+        use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+
+        let event_name = to_wstring(RELOAD_CONFIG_EVENT_NAME);
+        let event = unsafe { CreateEventW(None, false, false, PCWSTR(event_name.as_ptr())) }
+            .map_err(|err| anyhow!("Failed to create reload config event, {err}"))?;
+
+        let hwnd_ptr = hwnd.0 as isize;
+        let event_ptr = event.0 as isize;
+        std::thread::spawn(move || {
+            let event = HANDLE(event_ptr as _);
+            loop {
+                let result = unsafe { WaitForSingleObject(event, INFINITE) };
+                if result == WAIT_OBJECT_0 {
+                    let _ = unsafe {
+                        PostMessageW(
+                            Some(HWND(hwnd_ptr as _)),
+                            WM_USER_RELOAD_CONFIG,
+                            WPARAM(0),
+                            LPARAM(0),
+                        )
+                    };
+                }
+            }
+        });
+        
+        Ok(())
     }
 
     fn eventloop() -> Result<()> {
@@ -252,6 +288,11 @@ impl App {
                 debug!("message WM_USER_SWITCH_WINDOWS_DONE");
                 let app = get_app(hwnd)?;
                 app.switch_windows_state.modifier_released = true;
+            }
+            WM_USER_RELOAD_CONFIG => {
+                debug!("message WM_USER_RELOAD_CONFIG");
+                let app = get_app(hwnd)?;
+                app.reload_config();
             }
             WM_NCHITTEST => {
                 return Ok(LRESULT(HTCLIENT as _));
@@ -464,6 +505,29 @@ impl App {
     fn cancel_switch_app(&mut self) {
         if let Some(state) = self.switch_apps_state.take() {
             self.painter.unpaint(state);
+        }
+    }
+
+    fn reload_config(&mut self) {
+        use crate::load_config;
+        info!("reloading configuration");
+        match load_config() {
+            Ok(new_config) => {
+                self.config = new_config;
+                info!("configuration reloaded successfully");
+                if let Some(trayicon) = self.trayicon.as_mut() {
+                    if let Err(err) = trayicon.show_balloon("Window Switcher", "Configuration reloaded") {
+                        error!("Failed to show balloon notification: {err}");
+                    }
+                } else {
+                    // Fallback to message box if trayicon is disabled
+                    alert!("Configuration reloaded");
+                }
+            }
+            Err(err) => {
+                error!("Failed to reload configuration: {err}");
+                alert!("Failed to reload configuration: {err}");
+            }
         }
     }
 }

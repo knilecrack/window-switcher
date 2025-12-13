@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use std::{
     fs::{File, OpenOptions},
     path::Path,
@@ -28,7 +28,9 @@ fn run() -> Result<()> {
     }
     let instance = SingleInstance::create("WindowSwitcherMutex")?;
     if !instance.is_single() {
-        bail!("Another instance is running. This instance will abort.")
+        // Another instance is running, signal it to reload config
+        SingleInstance::signal_reload_config()?;
+        return Ok(());
     }
     start(&config)
 }

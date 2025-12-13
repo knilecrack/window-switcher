@@ -4,8 +4,10 @@ use anyhow::{anyhow, Result};
 use windows::core::PCWSTR;
 use windows::Win32::{
     Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE},
-    System::Threading::{CreateMutexW, ReleaseMutex},
+    System::Threading::{CreateEventW, CreateMutexW, ReleaseMutex, SetEvent},
 };
+
+pub const RELOAD_CONFIG_EVENT_NAME: &str = "WindowSwitcherReloadConfigEvent";
 
 /// A struct representing one running instance.
 pub struct SingleInstance {
@@ -33,6 +35,16 @@ impl SingleInstance {
     /// Returns whether this instance is single.
     pub fn is_single(&self) -> bool {
         self.handle.is_some()
+    }
+
+    /// Signals the running instance to reload its configuration.
+    pub fn signal_reload_config() -> Result<()> {
+        let event_name = to_wstring(RELOAD_CONFIG_EVENT_NAME);
+        let event = unsafe { CreateEventW(None, false, false, PCWSTR(event_name.as_ptr())) }
+            .map_err(|err| anyhow!("Failed to open reload config event, {err}"))?;
+        unsafe { SetEvent(event) }.map_err(|err| anyhow!("Failed to signal reload config, {err}"))?;
+        unsafe { let _ = CloseHandle(event); }
+        Ok(())
     }
 }
 

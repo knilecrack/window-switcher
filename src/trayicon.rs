@@ -6,8 +6,8 @@ use windows::Win32::{
     Foundation::{HWND, POINT},
     UI::{
         Shell::{
-            Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-            NOTIFYICONDATAW,
+            Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD,
+            NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
         },
         WindowsAndMessaging::{
             AppendMenuW, CreateIconFromResourceEx, CreatePopupMenu, GetCursorPos,
@@ -83,6 +83,7 @@ impl TrayIcon {
         tooltip.push(0);
         let tooltip: [u16; 128] = tooltip.try_into().unwrap();
         NOTIFYICONDATAW {
+            cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             uID: WM_USER_TRAYICON,
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP,
             uCallbackMessage: WM_USER_TRAYICON,
@@ -101,6 +102,31 @@ impl TrayIcon {
             AppendMenuW(hmenu, MF_STRING, IDM_EXIT as usize, TEXT_EXIT)?;
             Ok(hmenu)
         }
+    }
+
+    pub fn show_balloon(&mut self, title: &str, message: &str) -> Result<()> {
+        let mut info_title: Vec<u16> = title.encode_utf16().collect();
+        info_title.resize(63, 0);
+        info_title.push(0);
+        let info_title: [u16; 64] = info_title.try_into().unwrap();
+
+        let mut info: Vec<u16> = message.encode_utf16().collect();
+        info.resize(255, 0);
+        info.push(0);
+        let info: [u16; 256] = info.try_into().unwrap();
+
+        self.data.uFlags = NIF_INFO;
+        self.data.szInfoTitle = info_title;
+        self.data.szInfo = info;
+        self.data.dwInfoFlags = NIIF_INFO;
+
+        unsafe { Shell_NotifyIconW(NIM_MODIFY, &self.data) }
+            .ok()
+            .map_err(|e| anyhow!("Failed to show balloon notification, {}", e))?;
+
+        // Reset flags
+        self.data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        Ok(())
     }
 }
 
