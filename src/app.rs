@@ -96,6 +96,7 @@ impl App {
         app.set_trayicon();
 
         let app_ptr = Box::into_raw(Box::new(app)) as _;
+
         check_error(|| set_window_user_data(hwnd, app_ptr))
             .map_err(|err| anyhow!("Failed to set window ptr, {err}"))?;
 
@@ -132,7 +133,7 @@ impl App {
                 }
             }
         });
-        
+
         Ok(())
     }
 
@@ -205,7 +206,13 @@ impl App {
     fn set_trayicon(&mut self) {
         if let Some(trayicon) = self.trayicon.as_mut() {
             match trayicon.register(self.hwnd) {
-                Ok(()) => info!("trayicon registered"),
+                Ok(()) => {
+                    info!("trayicon registered");
+                    let _ = trayicon.show_balloon(
+                        "Window Switcher",
+                        "Ready to switch! Your windows are now under control 🪟",
+                    );
+                }
                 Err(err) => {
                     if !trayicon.exist() {
                         error!("{err}, retrying in 3 second");
@@ -237,7 +244,7 @@ impl App {
             Ok(ret) => ret,
             Err(err) => {
                 error!("{err}");
-                DefWindowProcW(hwnd, msg, wparam, lparam)
+                unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
             }
         }
     }

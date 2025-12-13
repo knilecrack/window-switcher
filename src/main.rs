@@ -26,12 +26,14 @@ fn run() -> Result<()> {
         })?;
         simple_logging::log_to(file, config.log_level);
     }
+    
     let instance = SingleInstance::create("WindowSwitcherMutex")?;
     if !instance.is_single() {
         // Another instance is running, signal it to reload config
         SingleInstance::signal_reload_config()?;
         return Ok(());
     }
+
     start(&config)
 }
 

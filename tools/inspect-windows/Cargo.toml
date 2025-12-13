@@ -1,17 +1,17 @@
 [package]
 name = "inspect-windows"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
-indexmap = "2.2.3"
+indexmap = "2"
 window-switcher = { path = "../.."}
 
 [dependencies.windows]
-version = "0.61.3"
+version = "0.62"
 features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",

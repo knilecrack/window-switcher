@@ -14,7 +14,7 @@ where
     unsafe {
         SetLastError(ERROR_SUCCESS);
         let result = f();
-        let error = Error::from_win32();
+        let error = Error::from_thread();
         if error == Error::empty() {
             Ok(result)
         } else {
