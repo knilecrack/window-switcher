@@ -1,12 +1,12 @@
 use std::{collections::HashSet, fs, path::PathBuf, process::Command};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use indexmap::IndexMap;
 use ini::{Ini, ParseOption};
 use log::LevelFilter;
 use windows::core::w;
 
-use crate::utils::{get_exe_folder, RegKey};
+use crate::utils::{RegKey, get_exe_folder};
 
 pub const SWITCH_WINDOWS_HOTKEY_ID: u32 = 1;
 pub const SWITCH_APPS_HOTKEY_ID: u32 = 2;
@@ -351,9 +351,52 @@ pub(crate) fn edit_config_file() -> Result<bool> {
 }
 
 fn get_config_path() -> Result<PathBuf> {
-    let folder = get_exe_folder()?;
-    let config_path = folder.join("window-switcher.ini");
-    Ok(config_path)
+    // Try config folder first (user-specific location)
+    if let Ok(config_dir) = get_config_folder() {
+        let config_path = config_dir.join("window-switcher.ini");
+        if config_path.exists() {
+            return Ok(config_path);
+        }
+
+        // If config doesn't exist in config folder, but the folder exists, use it
+        if config_dir.exists() {
+            return Ok(config_path);
+        }
+    }
+
+    // Fallback to exe directory
+    let exe_folder = get_exe_folder()?;
+    let exe_config_path = exe_folder.join("window-switcher.ini");
+
+    // If config exists in exe folder, use it
+    if exe_config_path.exists() {
+        return Ok(exe_config_path);
+    }
+
+    // If neither exists, create config folder and use it for new config
+    if let Ok(config_dir) = get_config_folder() {
+        std::fs::create_dir_all(&config_dir).map_err(|err| {
+            anyhow!(
+                "Failed to create config directory '{}', {err}",
+                config_dir.display()
+            )
+        })?;
+        Ok(config_dir.join("window-switcher.ini"))
+    } else {
+        // Fallback to exe directory if can't get config folder
+        Ok(exe_config_path)
+    }
+}
+
+fn get_config_folder() -> Result<PathBuf> {
+    use std::env;
+
+    // Use LOCALAPPDATA first, then APPDATA as fallback
+    let base_dir = env::var("LOCALAPPDATA")
+        .or_else(|_| env::var("APPDATA"))
+        .map_err(|_| anyhow!("Failed to get user config directory from environment variables"))?;
+
+    Ok(PathBuf::from(base_dir).join("WindowSwitcher"))
 }
 
 fn normalize_path_value(value: &str) -> String {

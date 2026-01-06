@@ -6,7 +6,7 @@ Window-Switcher offers hotkeys for quickly switching windows on Windows OS:
 
 ![switch-windows](https://github.com/sigoden/window-switcher/assets/4012553/06d387ce-31fd-450b-adf3-01bfcfc4bce3)
 
-2. ```Alt+Tab```: switch between apps. (disabled by default)
+1. ```Alt+Tab```: switch between apps. (disabled by default)
 
 ![switch-apps](https://github.com/sigoden/window-switcher/assets/4012553/0c74a7ca-3a48-4458-8d2d-b40dc041f067)
 
@@ -19,6 +19,7 @@ Window-Switcher offers hotkeys for quickly switching windows on Windows OS:
 3. **Launch:** `window-switcher.exe` is a standalone executable, no installation is required, just double-click the file to run it.
 
 For the tech-savvy, here's a one-liner to automate the installation:
+
 ```ps1
 iwr -useb https://raw.githubusercontent.com/sigoden/window-switcher/main/install.ps1 | iex
 ```
@@ -27,7 +28,21 @@ iwr -useb https://raw.githubusercontent.com/sigoden/window-switcher/main/install
 
 Window-Switcher offers various customization options to tailor its behavior to your preferences. You can define custom keyboard shortcuts, enable or disable specific features, and fine-tune settings through a configuration file.
 
-To personalize Window-Switcher, you'll need a configuration file named `window-switcher.ini`. This file should be placed in the same directory as the `window-switcher.exe` file. Once you've made changes to the configuration, make sure to restart Window-Switcher so your new settings can take effect.
+### Configuration File Location
+
+Window-Switcher looks for the configuration file `window-switcher.ini` in the following locations (in order of preference):
+
+1. **User Config Folder** (Recommended): `%LOCALAPPDATA%\WindowSwitcher\window-switcher.ini`
+   - On most systems: `C:\Users\[YourUsername]\AppData\Local\WindowSwitcher\window-switcher.ini`
+   - Falls back to: `%APPDATA%\WindowSwitcher\window-switcher.ini` if LOCALAPPDATA is not available
+
+2. **Application Directory**: Same directory as `window-switcher.exe`
+
+The application will automatically create the config folder if it doesn't exist when you first save a configuration. This approach allows for user-specific settings while maintaining backward compatibility with existing installations.
+
+### Configuration Options
+
+Once you've made changes to the configuration, the changes will take effect automatically without needing to restart Window-Switcher.
 
 Here is the default configuration:
 

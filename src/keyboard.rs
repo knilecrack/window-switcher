@@ -15,10 +15,7 @@ use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     System::LibraryLoader::GetModuleHandleW,
     UI::{
-        Input::KeyboardAndMouse::{
-            MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, RegisterHotKey,
-            SCANCODE_LSHIFT, SCANCODE_RSHIFT, UnregisterHotKey,
-        },
+        Input::KeyboardAndMouse::{SCANCODE_LSHIFT, SCANCODE_RSHIFT},
         WindowsAndMessaging::{
             CallNextHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_UP, SendMessageW, SetWindowsHookExW,
             UnhookWindowsHookEx, WH_KEYBOARD_LL,
