@@ -30,10 +30,13 @@ $tag = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/lates
 
 # $dest = "C:\Users\$env:USERNAME\AppData\Local\Programs\$command"
 
-$dest = "c:\tools\"
-if (-not (Test-Path $dest )) {
-    New-Item -ItemType Directory -Path $dest | Out-Null
-}
+# Install to a fixed location to avoid issues with PATH length limits
+# and create a symlink in the WinGet links folder for easy access.
+$dest = "c:\tools\window-switcher\"
+
+# Ensure destination directory exists
+New-Item -ItemType Directory -Path $dest -force | Out-Null
+
 
 $linkDestination = "c:\users\$env:USERNAME\appdata\local\microsoft\WinGet\Links\$command.exe"
 
@@ -61,12 +64,6 @@ catch {
 Move-Item $temp "$temp.zip"
 Expand-Archive "$temp.zip" -DestinationPath $temp
 
-if (-not (Test-Path $dest)) {
-    New-Item -ItemType Directory -Path $dest | Out-Null
-}
-else {
-    Remove-Item -Path $dest
-}
 
 if (Test-Path $outfile) {
     $retry = $true
@@ -82,7 +79,7 @@ if (Test-Path $outfile) {
                 Pause
             }
             else {
-                Write-Error "Failed to remove old $command.exe. Please try again."
+                Write-Error "Failed to remove old $command.exe. Please kill the process and try again."
             }
         }
     }
@@ -91,7 +88,7 @@ if (Test-Path $outfile) {
 Move-Item "$temp\$command.exe" $outfile
 
 if (-not (Test-Path $linkDestination)) {
-    New-Item -ItemType SymbolicLink -Path $linkDestination
+    New-Item -ItemType SymbolicLink -Path $linkDestination -target $outfile | Out-Null
 }
 
 Remove-Item -Force "$temp.zip"

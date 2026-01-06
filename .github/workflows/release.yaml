@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-    - v[0-9]+.[0-9]+.[0-9]+*
+      - v[0-9]+.[0-9]+.[0-9]+*
 
 jobs:
   all:
@@ -14,108 +14,107 @@ jobs:
     strategy:
       matrix:
         target:
-        - x86_64-pc-windows-msvc
-        - i686-pc-windows-msvc
+          - x86_64-pc-windows-msvc
+          - i686-pc-windows-msvc
         include:
-        - target: x86_64-pc-windows-msvc
-          os: windows-latest
-          platform: windows-64
-        - target: i686-pc-windows-msvc
-          os: windows-latest
-          platform: windows-32
-          use-cross: true
-        - target: aarch64-pc-windows-msvc
-          os: windows-latest
-          platform: windows-arm64
-          use-cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            platform: windows-64
+          - target: i686-pc-windows-msvc
+            os: windows-latest
+            platform: windows-32
+            use-cross: true
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            platform: windows-arm64
+            use-cross: true
 
     runs-on: ${{matrix.os}}
     env:
       BUILD_CMD: cargo
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Check Tag
-      id: check-tag
-      shell: bash
-      run: |
-        ver=${GITHUB_REF##*/}
-        echo "version=$ver" >> $GITHUB_OUTPUT
-        if [[ "$ver" =~ [0-9]+.[0-9]+.[0-9]+$ ]]; then
-          echo "rc=false" >> $GITHUB_OUTPUT
-        else
-          echo "rc=true" >> $GITHUB_OUTPUT
-        fi
+      - name: Check Tag
+        id: check-tag
+        shell: bash
+        run: |
+          ver=${GITHUB_REF##*/}
+          echo "version=$ver" >> $GITHUB_OUTPUT
+          if [[ "$ver" =~ [0-9]+.[0-9]+.[0-9]+$ ]]; then
+            echo "rc=false" >> $GITHUB_OUTPUT
+          else
+            echo "rc=true" >> $GITHUB_OUTPUT
+          fi
 
+      - name: Install Rust Toolchain Components
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-    - name: Install Rust Toolchain Components
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.target }}
+      - name: Install cross
+        if: matrix.use-cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
 
-    - name: Install cross
-      if: matrix.use-cross
-      uses: taiki-e/install-action@v2
-      with:
-        tool: cross
-  
-    - name: Overwrite build command env variable
-      if: matrix.use-cross
-      shell: bash
-      run: echo "BUILD_CMD=cross" >> $GITHUB_ENV
+      - name: Overwrite build command env variable
+        if: matrix.use-cross
+        shell: bash
+        run: echo "BUILD_CMD=cross" >> $GITHUB_ENV
 
-    - name: Show Version Information (Rust, cargo, GCC)
-      shell: bash
-      run: |
-        gcc --version || true
-        rustup -V
-        rustup toolchain list
-        rustup default
-        cargo -V
-        rustc -V
-      
-    - name: Build
-      shell: bash
-      run: $BUILD_CMD build --locked --release --target=${{ matrix.target }} ${{ matrix.cargo-flags }}
+      - name: Show Version Information (Rust, cargo, GCC)
+        shell: bash
+        run: |
+          gcc --version || true
+          rustup -V
+          rustup toolchain list
+          rustup default
+          cargo -V
+          rustc -V
 
-    - name: Build Archive
-      shell: bash
-      id: package
-      env:
-        target: ${{ matrix.target }}
-        platform: ${{ matrix.platform }}
-        version:  ${{ steps.check-tag.outputs.version }}
-      run: |
-        set -euxo pipefail
+      - name: Build
+        shell: bash
+        run: $BUILD_CMD build --locked --release --target=${{ matrix.target }} ${{ matrix.cargo-flags }}
 
-        bin=${GITHUB_REPOSITORY##*/}
-        dist_dir=`pwd`/dist
-        name=$bin-$version-$platform
-        executable=target/$target/release/$bin
+      - name: Build Archive
+        shell: bash
+        id: package
+        env:
+          target: ${{ matrix.target }}
+          platform: ${{ matrix.platform }}
+          version: ${{ steps.check-tag.outputs.version }}
+        run: |
+          set -euxo pipefail
 
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-          executable=$executable.exe
-        fi
+          bin=${GITHUB_REPOSITORY##*/}
+          dist_dir=`pwd`/dist
+          name=$bin-$version-$platform
+          executable=target/$target/release/$bin
 
-        mkdir $dist_dir
-        cp $executable $dist_dir
-        cd $dist_dir
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            executable=$executable.exe
+          fi
 
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-            archive=$dist_dir/$name.zip
-            7z a $archive *
-            echo "archive=dist/$name.zip" >> $GITHUB_OUTPUT
-        else
-            archive=$dist_dir/$name.tar.gz
-            tar -czf $archive *
-            echo "archive=dist/$name.tar.gz" >> $GITHUB_OUTPUT
-        fi
+          mkdir $dist_dir
+          cp $executable $dist_dir
+          cd $dist_dir
 
-    - name: Publish Archive
-      uses: softprops/action-gh-release@v2
-      if: ${{ startsWith(github.ref, 'refs/tags/') }}
-      with:
-        draft: false
-        files: ${{ steps.package.outputs.archive }}
-        prerelease: ${{ steps.check-tag.outputs.rc == 'true' }}
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+              archive=$dist_dir/$name.zip
+              7z a $archive *
+              echo "archive=dist/$name.zip" >> $GITHUB_OUTPUT
+          else
+              archive=$dist_dir/$name.tar.gz
+              tar -czf $archive *
+              echo "archive=dist/$name.tar.gz" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish Archive
+        uses: softprops/action-gh-release@v2
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        with:
+          draft: false
+          files: ${{ steps.package.outputs.archive }}
+          prerelease: ${{ steps.check-tag.outputs.rc == 'true' }}

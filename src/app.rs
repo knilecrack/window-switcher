@@ -1,31 +1,30 @@
-use crate::config::{edit_config_file, Config};
+use crate::config::{Config, edit_config_file};
 use crate::foreground::ForegroundWatcher;
 use crate::keyboard::KeyboardListener;
-use crate::painter::{find_clicked_app_index, GdiAAPainter};
+use crate::painter::{GdiAAPainter, find_clicked_app_index};
 use crate::startup::Startup;
 use crate::trayicon::TrayIcon;
 use crate::utils::{
-    check_error, get_app_icon, get_foreground_window, get_window_user_data, is_iconic_window,
-    is_running_as_admin, list_windows, set_foreground_window, set_window_user_data,
-    RELOAD_CONFIG_EVENT_NAME,
+    RELOAD_CONFIG_EVENT_NAME, check_error, get_app_icon, get_foreground_window,
+    get_window_user_data, is_iconic_window, is_running_as_admin, list_windows,
+    set_foreground_window, set_window_user_data,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use indexmap::IndexSet;
 use std::collections::HashMap;
-use windows::core::{w, PCWSTR};
 use windows::Win32::{
     Foundation::{GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
     System::LibraryLoader::GetModuleHandleW,
     UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GetWindowLongPtrW,
-        LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
-        SetWindowLongPtrW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWL_STYLE,
-        HICON, HTCLIENT, IDC_ARROW, MSG, WINDOW_STYLE, WM_COMMAND, WM_ERASEBKGND, WM_LBUTTONUP,
-        WM_NCHITTEST, WM_RBUTTONUP, WNDCLASSW, WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-        WS_EX_TOPMOST,
+        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW,
+        GWL_STYLE, GetMessageW, GetWindowLongPtrW, HICON, HTCLIENT, IDC_ARROW, LoadCursorW, MSG,
+        PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetWindowLongPtrW,
+        TranslateMessage, WINDOW_STYLE, WM_COMMAND, WM_ERASEBKGND, WM_LBUTTONUP, WM_NCHITTEST,
+        WM_RBUTTONUP, WNDCLASSW, WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     },
 };
+use windows::core::{PCWSTR, w};
 
 pub const NAME: PCWSTR = w!("Window Switcher");
 pub const WM_USER_TRAYICON: u32 = 6000;
@@ -59,6 +58,7 @@ pub struct App {
     switch_apps_state: Option<SwitchAppsState>,
     cached_icons: HashMap<String, HICON>,
     painter: GdiAAPainter,
+    keyboard_listener: KeyboardListener,
 }
 
 impl App {
@@ -92,6 +92,7 @@ impl App {
             switch_apps_state: None,
             cached_icons: Default::default(),
             painter,
+            keyboard_listener: _keyboard_listener,
         };
 
         app.set_trayicon();
@@ -113,7 +114,7 @@ impl App {
     fn start_reload_config_listener(hwnd: HWND) -> Result<()> {
         use crate::utils::to_wstring;
         use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
-        use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+        use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
 
         let event_name = to_wstring(RELOAD_CONFIG_EVENT_NAME);
         let event = unsafe { CreateEventW(None, false, false, PCWSTR(event_name.as_ptr())) }
@@ -241,7 +242,7 @@ impl App {
     }
 
     /// Window procedure callback for handling Windows messages.
-    /// 
+    ///
     /// # Safety
     /// This function is marked unsafe extern "system" because it's called by Windows
     /// as a callback. Windows guarantees valid parameters when calling this function.
@@ -351,7 +352,9 @@ impl App {
             WM_ERASEBKGND => {
                 return Ok(LRESULT(0));
             }
-            _ if msg == WM_USER_REGISTER_TRAYICON || msg == WM_TASKBARCREATED.load(std::sync::atomic::Ordering::SeqCst) => {
+            _ if msg == WM_USER_REGISTER_TRAYICON
+                || msg == WM_TASKBARCREATED.load(std::sync::atomic::Ordering::SeqCst) =>
+            {
                 let app = get_app(hwnd)?;
                 app.set_trayicon();
             }
@@ -543,10 +546,20 @@ impl App {
         info!("reloading configuration");
         match load_config() {
             Ok(new_config) => {
+                if let Err(err) = self
+                    .keyboard_listener
+                    .update_hotkeys(&self.config.to_hotkeys(), &new_config.to_hotkeys())
+                {
+                    error!("Failed to update hotkeys: {err}");
+                    alert!("Failed to update hotkeys: {err}");
+                    return;
+                }
                 self.config = new_config;
                 info!("configuration reloaded successfully");
                 if let Some(trayicon) = self.trayicon.as_mut() {
-                    if let Err(err) = trayicon.show_balloon("Window Switcher", "Configuration reloaded") {
+                    if let Err(err) =
+                        trayicon.show_balloon("Window Switcher", "Configuration reloaded")
+                    {
                         error!("Failed to show balloon notification: {err}");
                     }
                 } else {
@@ -563,7 +576,7 @@ impl App {
 }
 
 /// Retrieves the App instance stored in window user data.
-/// 
+///
 /// # Safety
 /// This function is safe to call as long as:
 /// - The hwnd is the window created by App::create_window()

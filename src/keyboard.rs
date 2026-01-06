@@ -7,18 +7,21 @@ use crate::{
     foreground::IS_FOREGROUND_IN_BLACKLIST,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     System::LibraryLoader::GetModuleHandleW,
     UI::{
-        Input::KeyboardAndMouse::{SCANCODE_LSHIFT, SCANCODE_RSHIFT},
+        Input::KeyboardAndMouse::{
+            MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, RegisterHotKey,
+            SCANCODE_LSHIFT, SCANCODE_RSHIFT, UnregisterHotKey,
+        },
         WindowsAndMessaging::{
-            CallNextHookEx, SendMessageW, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK,
-            KBDLLHOOKSTRUCT, LLKHF_UP, WH_KEYBOARD_LL,
+            CallNextHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_UP, SendMessageW, SetWindowsHookExW,
+            UnhookWindowsHookEx, WH_KEYBOARD_LL,
         },
     },
 };
@@ -47,6 +50,7 @@ impl KeyboardListener {
                 is_modifier_pressed: false,
             })
             .collect();
+
         *KEYBOARD_STATE.lock() = keyboard_state;
 
         let hook = unsafe {
@@ -63,6 +67,29 @@ impl KeyboardListener {
         info!("keyboard listener start");
 
         Ok(Self { hook })
+    }
+
+    pub fn update_hotkeys(
+        &mut self,
+        old_hotkeys: &[&Hotkey],
+        new_hotkeys: &[&Hotkey],
+    ) -> Result<()> {
+        info!(
+            "Updating hotkeys: old={:?}, new={:?}",
+            old_hotkeys, new_hotkeys
+        );
+
+        let keyboard_state = new_hotkeys
+            .iter()
+            .map(|hotkey| HotKeyState {
+                hotkey: (*hotkey).clone(),
+                is_modifier_pressed: false,
+            })
+            .collect();
+
+        *KEYBOARD_STATE.lock() = keyboard_state;
+        info!("Hotkeys updated successfully");
+        Ok(())
     }
 }
 
@@ -122,7 +149,11 @@ unsafe extern "system" fn keyboard_proc(code: i32, w_param: WPARAM, l_param: LPA
             if is_key_pressed() && state.is_modifier_pressed {
                 let id = state.hotkey.id;
                 if scan_code == state.hotkey.code {
-                    let reverse = if IS_SHIFT_PRESSED.load(Ordering::SeqCst) { 1 } else { 0 };
+                    let reverse = if IS_SHIFT_PRESSED.load(Ordering::SeqCst) {
+                        1
+                    } else {
+                        0
+                    };
                     if id == SWITCH_APPS_HOTKEY_ID {
                         // SAFETY: window is a valid HWND set during init
                         unsafe {
@@ -130,7 +161,9 @@ unsafe extern "system" fn keyboard_proc(code: i32, w_param: WPARAM, l_param: LPA
                         };
                         PREVIOUS_KEYCODE.store(scan_code, Ordering::SeqCst);
                         return LRESULT(1);
-                    } else if id == SWITCH_WINDOWS_HOTKEY_ID && !IS_FOREGROUND_IN_BLACKLIST.load(Ordering::SeqCst) {
+                    } else if id == SWITCH_WINDOWS_HOTKEY_ID
+                        && !IS_FOREGROUND_IN_BLACKLIST.load(Ordering::SeqCst)
+                    {
                         // SAFETY: window is a valid HWND set during init
                         unsafe {
                             SendMessageW(
