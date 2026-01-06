@@ -5,7 +5,7 @@ use crate::utils::{
     create_scheduled_task, delete_scheduled_task, exist_scheduled_task, get_exe_path, RegKey,
 };
 
-const TASK_NAME: &str = "WindowSwitcher";
+const TASK_NAME: &str = "WindowSwitcher_StartupTask";
 const HKEY_RUN: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const HKEY_NAME: PCWSTR = w!("Window Switcher");
 

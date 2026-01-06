@@ -12,6 +12,7 @@ impl HandleWrapper {
     pub fn get_handle(&self) -> HANDLE {
         self.handle
     }
+
     pub fn get_handle_mut(&mut self) -> &mut HANDLE {
         &mut self.handle
     }

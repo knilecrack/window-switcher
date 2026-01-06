@@ -1,11 +1,11 @@
 use super::to_wstring;
 
-use anyhow::{anyhow, Result};
-use windows::core::PCWSTR;
+use anyhow::{Result, anyhow};
 use windows::Win32::{
     Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE},
     System::Threading::{CreateEventW, CreateMutexW, ReleaseMutex, SetEvent},
 };
+use windows::core::PCWSTR;
 
 pub const RELOAD_CONFIG_EVENT_NAME: &str = "WindowSwitcherReloadConfigEvent";
 
@@ -46,8 +46,11 @@ impl SingleInstance {
         let event_name = to_wstring(RELOAD_CONFIG_EVENT_NAME);
         let event = unsafe { CreateEventW(None, false, false, PCWSTR(event_name.as_ptr())) }
             .map_err(|err| anyhow!("Failed to open reload config event, {err}"))?;
-        unsafe { SetEvent(event) }.map_err(|err| anyhow!("Failed to signal reload config, {err}"))?;
-        unsafe { let _ = CloseHandle(event); }
+        unsafe { SetEvent(event) }
+            .map_err(|err| anyhow!("Failed to signal reload config, {err}"))?;
+        unsafe {
+            let _ = CloseHandle(event);
+        }
         Ok(())
     }
 }
